@@ -1,0 +1,444 @@
+<html>
+<head>
+<script src="/cdn-cgi/apps/head/W6TWestWcDrqGbBxxz9zH-CwRvA.js"></script><link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css" type="text/css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.4.3/angular.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.4.3/angular-animate.js"></script>
+<script src="mqqtws31.js"></script>
+<style>
+        .animate-show {
+            opacity: 1;
+        }
+
+            .animate-show.ng-hide {
+                opacity: 0;
+            }
+
+            .animate-show.ng-hide-add.ng-hide-add-active,
+            .animate-show.ng-hide-remove.ng-hide-remove-active {
+                -webkit-transition: all linear 0.5s;
+                transition: all linear 0.5s;
+            }
+
+
+        .shadow {
+            -webkit-box-shadow: 1px 5px 14px 0px rgba(0,0,0,0.75);
+            -moz-box-shadow: 1px 5px 14px 0px rgba(0,0,0,0.75);
+            box-shadow: 1px 5px 14px 0px rgba(0,0,0,0.75);
+        }
+
+        .mainframe {
+            border: 2px solid #d5d5d5;
+            border-radius: 5px;
+            margin: 20px;
+            min-height: 450px;
+            max-width: 800px;
+        }
+    </style>
+</head>
+<body>
+<script>
+        if (!(window.File && window.FileReader && window.FileList && window.Blob)) {
+            alert('The File APIs not support.The application will not work !.');
+        }
+    </script>
+<script>
+        var app = angular.module('lcdGUI', ['ngAnimate']);
+
+        app.directive('fileToBase64', function () {
+            return {
+                restrict: 'A',
+                require: 'ngModel',
+                scope: {
+                    validFlag: "=",
+                    prewImgData: "="
+                },
+                link: function ($scope, $element, $attrs, ngModel) {
+
+                    var reader = new FileReader();
+                    var previewContainer = angular.element(document.querySelector("[data-image-input=" + $attrs['id'] + "]"));
+                    console.log(previewContainer);
+
+                    $element.bind("change", function (obj) {
+                        var reader2 = new FileReader();
+                        reader2.onload = function (e) {
+                            $scope.prewImgData = e.target.result;
+                        }
+                        reader2.readAsDataURL($element[0].files[0]);
+                        reader.readAsArrayBuffer($element[0].files[0]);
+
+                    });
+
+
+                    reader.onload = function (e) {
+                        var rawData = reader.result;
+
+                        var view = new Uint8Array(rawData);
+
+                        if (view[0] == 66 && view[1] == 77 && view[18] == 96 && view[22] == 64) {
+                            $scope.$apply(function () {
+                                $scope.validFlag = true;
+                                var t = view.subarray(62, 1086);
+                                for (var x = 0; x < 12 ; x++) {
+                                    for (var y = 0; y < 32; y++) {
+                                        var temp = t[(y * 12) + x];
+                                        t[(y * 12) + x] = t[((64 - y) * 12) + x];
+                                        t[((64 - y) * 12) + x] = temp;
+                                    }
+                                }
+
+                                ngModel.$setViewValue(t);
+                            });
+
+                        }
+                        else {
+                            $scope.$apply(function () {
+                                $scope.validFlag = false;
+                                ngModel.$setViewValue("");
+                            });
+                        }
+                    }
+                }
+            };
+        });
+
+        app.service('mqttService', function ($rootScope) {
+            var client = null;
+            var service = this;
+            service.isConnected = false;
+            var destinations = [];
+
+            function onConnect() {
+                service.isConnected = true;
+                for (i = 0; i < destinations.length; i++) {
+                    client.subscribe(destinations[i]);
+                }
+                $rootScope.$broadcast('MQTT_CONNECTED');
+            }
+
+            function doFail(e) {
+                $rootScope.$broadcast('MQTT_ERROR');
+                service.disconnect();
+            }
+
+            function onConnectionLost(responseObject) {
+                this.isConnected = false;
+                $rootScope.$broadcast('MQTT_DISCONNECTED');
+            }
+
+            function onMessageReceived(message) {
+                $rootScope.$broadcast('MQTT_MSG_RECEIVED', { data: message });
+            }
+
+            this.connect = function (params) {
+                client = new Paho.MQTT.Client(params.host, params.port, params.clientName);
+                client.onConnectionLost = onConnectionLost;
+                client.onMessageArrived = onMessageReceived;
+                var options = {
+                    useSSL: true,
+                    userName: params.username,
+                    password: params.password,
+                    onSuccess: onConnect,
+                    onFailure: doFail
+                }
+                client.connect(options);
+            };
+
+
+            this.sendMessage = function (msg, dest) {
+                var message = new Paho.MQTT.Message(msg);
+                message.destinationName = dest;
+                client.send(message);
+            };
+
+            this.subscribeTo = function (dest) {
+                if (destinations.indexOf(dest) < 0) {
+                    destinations.push(dest);
+                }
+            }
+
+
+
+            this.disconnect = function () {
+                client.disconnect();
+                client = null;
+                this.isConnected = false;
+            }
+
+
+
+        });
+
+        app.controller('msgController', function ($scope, $timeout, mqttService) {
+            self = $scope;
+            self.host = "";
+            self.isConnected = false;
+            self.port  = 0;
+            self.password = "";
+            self.username = "";
+            self.activeTab = 1;
+            self.archivedMessages = [];
+            self.isValidImage = true;
+            self.prewImgData = null;
+            self.currentMessage = {
+                id: 0,
+                data: 'Hellow World',
+                time: Date.now(),
+                type: 'TXT'
+            };
+
+            self.reset = function () {
+                self.currentMessage.type = "TXT";
+                self.currentMessage.data = "";
+                self.currentMessage.time = Date.now();
+                self.currentMessage.id = 0;
+                self.isValidImage = true;
+                self.prewImgData = null;
+
+            }
+
+            self.sendMessage = function () {
+                mqttService.sendMessage(self.currentMessage.data, self.currentMessage.type);
+                self.addToArchive(self.currentMessage);
+                showMessage("Message sent !");
+
+            }
+
+            self.addToArchive = function (msg) {
+                var m = { data: msg.data, time: msg.time, type: msg.type };
+                if (m.type == "IMG") {
+                    m.imgData = self.prewImgData.toString();
+                }
+                m.id = Date.now();
+                self.archivedMessages.push(m);
+            }
+
+            self.connect = function () {
+                var options = {
+                    host: self.host,
+                    port: parseInt(self.port),
+                    username: self.username,
+                    password: self.password,
+                    clientName: 'testclient'
+                }
+                mqttService.subscribeTo('ACK');
+                mqttService.connect(options);
+            }
+
+            self.disconnect = function () {
+                mqttService.disconnect();
+            }
+
+            self.$on('MQTT_MSG_RECEIVED', function (event, args) {
+                self.$apply(function () {
+                    self.receivedMsg = args.data.payloadString;
+                    if (args.data.destinationName == 'ACK') {
+                        showMessage("ACK Received.")
+                    }
+                    else {
+                        showMessage("Message Received: " + self.receivedMsg);
+                    }
+                });
+            });
+
+            self.$on('MQTT_CONNECTED', function (event, args) {
+                self.$apply(function () {
+                    self.isConnected = true;
+                    showMessage("Connected to MQTT server.");
+                });
+
+            });
+
+            self.$on('MQTT_DISCONNECTED', function (event, args) {
+                self.isConnected = false;
+                showMessage("Disconnected from to MQTT server.");
+            });
+
+            self.$on('MQTT_ERROR', function (event, args) {
+
+                self.$apply(function () {
+                    self.isConnected = false;
+                    showMessage("There was an error !");
+                });
+            })
+
+            function showMessage(msg) {
+                self.sysMessage = msg;
+                self.showSysMessage = true;
+                $timeout(function () {
+                    self.showSysMessage = false;
+                }, 3000);
+            }
+        });
+    </script>
+<div class="container mainframe" ng-app="lcdGUI" ng-controller="msgController as msgCtr">
+<div class="row" style="background-color:#d5d5d5;">
+<div class="col-md-8"><h2>Wifi Display Messenger</h2></div>
+</div>
+<div class="row" style="padding-bottom:10px">
+<div class="col-md-8">&nbsp;<label class="label label-info animate-show" ng-show="showSysMessage">{{sysMessage}}</label></div>
+</div>
+<div class="row">
+<ul class="nav nav-tabs">
+<li role="presentation" class="col-md-2" ng-class="{'active' : activeTab==0 && isConnected }" ng-click="activeTab = 0">
+<a href="#"><span class="glyphicon glyphicon-comment" style="font-size:xx-large"></span></a>
+</li>
+<li role="presentation" class="col-md-2" ng-class="{'active' : activeTab==1 }" ng-click="activeTab = 1">
+<a href="#">
+<span class="glyphicon glyphicon-cog" style="font-size:xx-large"></span>
+</a>
+</li>
+<li role="presentation" class="col-md-2" ng-class="{'active' : activeTab==2 }" ng-click="activeTab = 2">
+<a href="#">
+<span class="glyphicon glyphicon-list-alt" style="font-size:xx-large"></span>
+</a>
+</li>
+<li>
+<h4>
+<label class="label label-success " ng-show="isConnected">
+Connected <span class="glyphicon glyphicon-ok-circle"></span>
+</label>
+<label class="label label-danger" ng-show="!isConnected">
+Not Connected <span class="glyphicon glyphicon-remove-circle"></span>
+</label>
+</h4>
+</li>
+</ul>
+</div>
+<div class="row">&nbsp;</div>
+<div id="panel1" ng-show="activeTab == 0 && isConnected" style="padding:2px">
+<form>
+<div class="row">
+<div class="col-md-4">
+<div class="btn-group " role="group">
+<button type="button" class="btn btn-default" ng-class="{'active':currentMessage.type == 'TXT'}" ng-click="reset();currentMessage.type = 'TXT';">
+<span class="glyphicon glyphicon-text-width col-md-3 "></span>
+</button>
+<button type="button" class="btn btn-default" ng-class="{active:currentMessage.type != 'TXT'}" ng-click="reset();currentMessage.type = 'IMG';"><span class="glyphicon glyphicon-picture col-md-3 "></span></button>
+</div>
+</div>
+</div>
+<div class="row">&nbsp;</div>
+<div class="row" ng-show="currentMessage.type == 'IMG'">
+<div class="col-md-4"><label>Select a File</label></div>
+</div>
+<div class="row" ng-show="currentMessage.type == 'IMG'">
+<div class="col-md-5">
+<input type="file" style="padding-left:0px;" id="myfile" value="{{imgPath}}" ng-model="currentMessage.data" file-to-base64 valid-flag="isValidImage" prew-img-data="prewImgData" />
+</div>
+</div>
+<div class="row" ng-show="currentMessage.type == 'IMG'">
+<div class="col-md-5">
+<div style="width:130px; padding-top: 15px;">
+<img data-image-input="myfile" class="img-thumbnail img-responsive" src="{{prewImgData}}" />
+</div>
+</div>
+</div>
+<div class="row">
+<div class="alert alert-danger col-md-5 animate-show" style="padding: 1px;
+                                    margin-top: 10px;" role="alert" ng-show="!isValidImage && currentMessage.type=='IMG'">
+<span class="glyphicon glyphicon-remove">
+</span>
+Only 1 bit monochrome bitmaps of size 96x64 supported
+</div>
+</div>
+<div class="row">&nbsp;</div>
+<div class="row" ng-show="currentMessage.type == 'TXT'">
+<div class="col-md-8">
+<label>Message</label><br />
+<textarea style="width:80%; background-color:black; color:white;font-family:monospace" cols="20" rows="5" ng-model="currentMessage.data"></textarea>
+</div>
+</div>
+<div class="row">&nbsp;</div>
+<div class="row">
+<div class="col-md-8">
+<button type="button" class="btn btn-primary " ng-click="sendMessage();" ng-disabled="(!isConnected) || (currentMessage.data.length == 0)">Send</button>
+<button type="reset" class="btn btn-success" ng-click="reset();">Reset</button>
+</div>
+</div>
+</form>
+</div>
+<div id="panel2" ng-show="activeTab == 1">
+<div class="row">
+<div class="col-md-5">
+<div class="input-group">
+<span class="input-group-addon" id="basic-addon1">server</span>
+<input type="text" class="form-control" placeholder="Server Name" aria-describedby="basic-addon1" ng-model="host">
+</div>
+</div>
+</div>
+<div class="row">&nbsp;</div>
+<div class="row">
+<div class="col-md-5">
+<div class="input-group">
+<span class="input-group-addon" id="basic-addon1">Port</span>
+<input type="text" class="form-control" placeholder="Port" aria-describedby="basic-addon1" ng-model="port">
+</div>
+</div>
+</div>
+<div class="row">&nbsp;</div>
+<div class="row">
+<div class="col-md-5">
+<div class="input-group ">
+<span class="input-group-addon" id="basic-addon1">User Name</span>
+<input type="text" class="form-control" placeholder="User Name" aria-describedby="basic-addon1" ng-model="username">
+</div>
+</div>
+</div>
+<div class="row">&nbsp;</div>
+<div class="row">
+<div class="col-md-5">
+<div class="input-group ">
+<span class="input-group-addon" id="basic-addon1">Password</span>
+<input type="password" class="form-control" placeholder="Password" aria-describedby="basic-addon1" ng-model="password">
+</div>
+</div>
+</div>
+<div class="row">&nbsp;</div>
+<div class="row">
+<div class="col-md-8">
+<button type="button" class="btn btn-primary " ng-click="connect();" ng-disabled="isConnected">Connect</button>
+<button type="button" class="btn btn-success" ng-click="disconnect();" ng-disabled="!isConnected">Disconnect</button>
+</div>
+</div>
+</div>
+<div id="panel3" ng-show="activeTab == 2">
+<div class="row">
+<div class="col-md-8">
+<button class="btn btn-primary" type="button">
+History Items : <span class="badge">{{archivedMessages.length}}</span>
+</button>
+</div>
+</div>
+<div class="row">&nbsp;</div>
+<div class="row">
+<div class="col-md-8">
+<div style="max-height:300px;overflow-y:scroll">
+<div ng-repeat="n in archivedMessages">
+<div class="panel panel-default">
+<div class="panel-heading" style="padding:2px">
+<span ng-if="n.type == 'IMG'">
+Image
+</span>
+<span ng-if="n.type == 'TXT'">
+TEXT
+</span>
+<code> sent at {{n.time | date:'yyyy-MM-dd HH:mm:ss'}}</code>
+</div>
+<div class="panel-body" style="padding:5px">
+<span ng-if="n.type == 'IMG'">
+<img class="img-thumbnail img-responsive" src="{{n.imgData}}" />
+</span>
+<span ng-if="n.type == 'TXT'">
+{{n.data}}
+</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="row">&nbsp;</div>
+</div>
+</body>
+</html>
